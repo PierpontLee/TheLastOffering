@@ -36,46 +36,23 @@ Section	Coordinates (Approximate)	Grid Position	Dimensions (in pixels)
 """
 import tkinter as tk
 from PIL import Image, ImageTk
-
 import random
 import math
+import numpy as np
+import tensorflow as tf
 
-import tensorflow as tf # type: ignore
-import numpy as np # type: ignore
+WINDOW_TITLE = "The Last Offering"
+WINDOW_SIZE = "1600x1200"
 
-# Window Constants
-WINDOW_TITLE = "grrr"
-WINDOW_SIZE = "1200x900"
-
-#Assets
-Background = ['cemetery.png', 'village.png', 'castle.png']
-EnemySprites = ['gravekeeper.png', 'guard.png', 'cultLeader.png']
-area = {
-0: 'cemetery',
-1: 'village',
-2: 'castle'
-}
-Enemylist = {
-        # ID: {Name, Health, Damage, Heal}
-        0: ['GraveKeeper', 50, 5 ,5],
-        1: ['Guard', 100, 10, 10],
-        2: ['CultLeader', 200, 15, 15]
-    }
-
-
+# --- Enemy AI Class ---
 class EnemyAI:
     def __init__(self):
-        self.model = tf.keras.Sequential([ # type: ignore
-            tf.keras.layers.Dense(16, activation='relu', input_shape=(3,)), # type: ignore
-            tf.keras.layers.Dense(3, activation='softmax') # type: ignore
+        self.model = tf.keras.Sequential([
+            tf.keras.layers.Dense(16, activation='relu', input_shape=(3,)),
+            tf.keras.layers.Dense(3, activation='softmax')
         ])
-
-        self.model.compile(
-            optimizer='adam',
-            loss='sparse_categorical_crossentropy'
-        )
-
-        self.history = []  # stores player actions
+        self.model.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+        self.history = [0, 1, 2] # Initial dummy history to prevent empty arrays
 
     def remember(self, action):
         self.history.append(action)
@@ -83,161 +60,148 @@ class EnemyAI:
             self.history.pop(0)
 
     def train(self):
-        if len(self.history) < 3:
-            return
-
-        X = np.array([self.history[:3]])
-        y = np.array([self.history[-1]])
-
-        self.model.fit(X, y, epochs=5, verbose=0)
+        if len(self.history) >= 3:
+            X = np.array([self.history[:3]])
+            y = np.array([self.history[-1]])
+            self.model.fit(X, y, epochs=2, verbose=0)
 
     def predict(self):
-        if len(self.history) < 3:
-            return np.random.randint(0, 3)
-
-        X = np.array([self.history[:3]])
+        X = np.array([self.history[-3:]]) # Use last 3 moves
         prediction = self.model.predict(X, verbose=0)
         return int(np.argmax(prediction))
 
-
-def enemy_decision(predicted_player_move):
-    if predicted_player_move == 0:   # Player attacks
-        return "parry"
-    elif predicted_player_move == 1: # Player parries
-        return "heal"
-    else:                            # Player heals
-        return "attack"
-
-#Entities
+# --- Character Class ---
 class Character:
     def __init__(self, name, health, damage, type):
         self.name = name
+        self.max_health = health
         self.health = health
         self.damage = damage
         self.type = type
-        self.score = 0
         self.action = None
         self.multiplier = 1.0
 
-    def IncreaseScore(self, amount):
-        self.score += amount
-
-#Game System
+# --- Integrated Game System ---
 class GameSystem:
-    #Initialize Game
-    def __init__(self, name):
+    def __init__(self, player_name):
         self.current_area = 0
-        self.areaName = area[self.current_area]
-        self.enemy = Character(Enemylist[self.current_area][0], Enemylist[self.current_area][1], 
-                          Enemylist[self.current_area][2], "Enemy")
-        self.player = Character(name, 100, 10, "Player")        
+        self.player = Character(player_name, 100, 10, "Player")
+        self.ai = EnemyAI()
+        self.minigame_result = None # 'win', 'lose', 'draw', or dice value
+        self.setArea()
 
-    #Set Area
-    def setArea(self, name = None):
-        self.areaImage = Background[self.current_area]
-        self.enemySprite = EnemySprites[self.current_area]
-        self.enemy = Character(Enemylist[self.current_area][0], Enemylist[self.current_area][1], 
-                          Enemylist[self.current_area][2], "Enemy")
-        if self.current_area == 0: #Change to self.current_area FOR DEBUG !!!
-            self.player = Character(name, 100, 10, "Player")
-        elif self.current_area == 2:
-            return "WIN"
+    def setArea(self):
+        if self.current_area > 2: return "GAME_WIN"
+        
+        enemy_data = [
+            ['GraveKeeper', 50, 5],
+            ['Guard', 100, 10],
+            ['CultLeader', 200, 15]
+        ]
+        data = enemy_data[self.current_area]
+        self.enemy = Character(data[0], data[1], data[2], "Enemy")
 
-    #Check Entity Status
-    def CheckStatus(self, entity):
-        if entity.health > 0:
-            return
-        if entity.type == "Enemy":
+    def get_enemy_move(self):
+        # 1. AI predicts player
+        predicted_move = self.ai.predict()
+        # 2. Decide counter
+        if predicted_move == 0: self.enemy.action = "parry"
+        elif predicted_move == 1: self.enemy.action = "heal"
+        else: self.enemy.action = "attack"
+        return self.enemy.action
+
+    def play_turn(self, player_action_idx, minigame_input=None):
+        # Map: 0: attack, 1: parry, 2: heal
+        actions = ["attack", "parry", "heal"]
+        self.player.action = actions[player_action_idx]
+        
+        # Enemy decides and Player move is remembered
+        self.get_enemy_move()
+        self.ai.remember(player_action_idx)
+        self.ai.train()
+
+        # Resolve Minigame based on area
+        if self.current_area == 0: self.resolve_coin(minigame_input)
+        elif self.current_area == 1: self.resolve_rps(minigame_input)
+        elif self.current_area == 2: self.resolve_dice()
+
+        self.CalculateOutcome()
+
+    # --- Minigame Logic ---
+    def resolve_coin(self, guess):
+        result = random.choice(['heads', 'tails'])
+        self.minigame_result = 'win' if guess == result else 'lose'
+
+    def resolve_rps(self, guess):
+        enemy_choice = random.choice(['rock', 'paper', 'scissors'])
+        if guess == enemy_choice: self.minigame_result = 'draw'
+        elif (guess == 'rock' and enemy_choice == 'scissors') or \
+             (guess == 'paper' and enemy_choice == 'rock') or \
+             (guess == 'scissors' and enemy_choice == 'paper'):
+            self.minigame_result = 'win'
+        else: self.minigame_result = 'lose'
+
+    def resolve_dice(self):
+        self.minigame_result = random.randint(1, 6)
+
+    # --- REFINED OUTCOME CALCULATION ---
+    def CalculateOutcome(self):
+        p = self.player
+        e = self.enemy
+        res = self.minigame_result
+
+        # --- 1. HANDLE PARRY REFINEMENT ---
+        if p.action == "parry":
+            if e.action == "attack":
+                # Area 0: Coin Flip
+                if self.current_area == 0:
+                    if res == 'lose': p.health -= e.damage # Parry Failed
+                    else: e.health -= math.ceil(p.damage * 1.5) # Successful Parry
+                
+                # Area 1: RPS
+                elif self.current_area == 1:
+                    if res == 'lose': p.health -= math.ceil(e.damage * 1.5)
+                    elif res == 'draw': pass # Blocked, no damage
+                    else: e.health -= math.ceil(p.damage * 1.5) # Counter
+                
+                # Area 2: Dice
+                elif self.current_area == 2:
+                    if res == 1: p.health -= (e.damage * 2)
+                    elif res == 2: p.health -= math.ceil(e.damage * 1.5)
+                    elif res in [3, 4]: e.health -= p.damage # Normal counter
+                    elif res == 5: e.health -= math.ceil(p.damage * 1.5)
+                    elif res == 6: e.health -= (p.damage * 2)
+            else:
+                pass # Enemy didn't attack, parry does nothing
+
+        # --- 2. HANDLE ATTACK / HEAL ---
+        else:
+            # Simple multiplier logic for standard actions
+            mult = 1.5 if res == 'win' or (isinstance(res, int) and res >= 4) else 1.0
+            
+            if p.action == "attack":
+                if e.action == "parry": p.health -= math.ceil(e.damage * 1.5)
+                else: e.health -= math.ceil(p.damage * mult)
+            
+            if p.action == "heal":
+                p.health += math.ceil(10 * mult)
+                if p.health > p.max_health: p.health = p.max_health
+
+        # --- 3. ENEMY NON-PARRY ACTIONS ---
+        if e.action == "attack" and p.action != "parry":
+            p.health -= e.damage
+        elif e.action == "heal":
+            e.health += 10
+
+        # Check for deaths
+        self.check_progression()
+
+    def check_progression(self):
+        if self.enemy.health <= 0:
             self.current_area += 1
             self.setArea()
-        else:
-            self.current_area = 0
-            self.setArea()
-    
-    #Calculate Outcome
-    def CalculateOutcome(self):
-        # Player's turn
-        if self.player.action == "attack":
-            if self.enemy.action == "parry":
-                self.player.health -= math.ceil(1.5 * self.enemy.multiplier)
-                self.CheckStatus(self.player)
-            else:
-                self.enemy.health -= math.ceil(self.player.damage * self.player.multiplier)
-                self.CheckStatus(self.enemy)
-        elif self.player.action == "heal":
-            self.player.health += math.ceil(self.player.damage * self.player.multiplier)
-            if self.player.health > 100:
-                self.player.health = 100
-
-        # Enemy's turn
-        if self.enemy.action == "attack":
-            if self.player.action == "parry":
-                self.enemy.health -= math.ceil(1.5 * self.player.multiplier)
-                self.CheckStatus(self.enemy)
-            else:
-                self.player.health -= math.ceil(self.enemy.damage * self.enemy.multiplier)
-                self.CheckStatus(self.player)
-        elif self.enemy.action == "heal":
-            self.enemy.health += math.ceil(self.enemy.damage * self.enemy.multiplier)
-            if self.enemy.health > Enemylist[self.current_area][1]:
-                self.enemy.health = Enemylist[self.current_area][1]
-
-    # Minigame: Coin Flip
-    def coin_flip(self, player_guess):
-        flip_result = random.choice(['heads', 'tails'])
-        # Player in
-        if player_guess == flip_result:
-            self.player.multiplier = 1.5
-            self.enemy.multiplier = 0.5
-            self.player.score += 1
-        
-        # Enemy infavored
-        else:
-            self.player.multiplier = 0.5
-            self.enemy.multiplier = 1.5
-
-    # Minigame: Rock Paper Scissors
-    def rock_paper_scissors(self, player_choice):
-        choices = ['rock', 'paper', 'scissors']
-        enemy_choice = random.choice(choices)
-
-        # Draw
-        if player_choice == enemy_choice:
-            self.player.multiplier = 1.0
-            self.enemy.multiplier = 1.0
-
-        # Player wins
-        elif (player_choice == 'rock' and enemy_choice == 'scissors') or \
-             (player_choice == 'paper' and enemy_choice == 'rock') or \
-             (player_choice == 'scissors' and enemy_choice == 'paper'):
-            self.player.multiplier = 1.5
-            self.enemy.multiplier = 0.5
-            self.player.score += 1
-
-        # Enemy wins
-        else: 
-            self.player.multiplier = 0.5
-            self.enemy.multiplier = 1.5
-    
-    # Minigame: Dice Roll
-    def dice_roll(self):
-        player_roll = random.randint(1, 6) #later implement animation of rolling dice player and enemy
-        enemy_roll = random.randint(1, 6)
-
-        # Determine multipliers based on rolls
-        roll_multipliers = {
-            1: 0.2,
-            2: 0.5,
-            3: 0.8,
-            4: 1.2,
-            5: 1.5,
-            6: 2.0
-        }
-
-        self.player.multiplier = roll_multipliers[player_roll]
-        self.enemy.multiplier = roll_multipliers[enemy_roll]
-        if player_roll >= 4:
-            self.player.score += player_roll - 3
+        elif self.player.health <= 0:
+            print("Game Over")
 
 
 class GameUI:
