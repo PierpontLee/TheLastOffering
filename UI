@@ -1,19 +1,123 @@
 import tkinter as tk
 from PIL import Image, ImageTk
+import random
+import math
+import numpy as np
+# import tensorflow as tf  # Uncommented if running with TF
 
-# 1. Setup the window
-root = tk.Tk()
-root.title("My Python Game")
+# ... (Keep your EnemyAI and Character classes exactly as they are) ...
 
-# 2. Create a Canvas (this is where your Canva assets live)
-canvas = tk.Canvas(root, width=800, height=600)
-canvas.pack()
+class GameUI:
+    def __init__(self, root, game_system):
+        self.root = root
+        self.game_system = game_system
+        self.root.title("Grrr - Game")
+        self.root.geometry("1200x900")
+        self.root.resizable(False, False)
 
-# 3. Load your Canva asset
-img = Image.open("your_asset.png")
-photo = ImageTk.PhotoImage(img)
+        # Dictionary to store persistent image references
+        self.images = {}
 
-# 4. Place it on the screen
-canvas.create_image(400, 300, image=photo)
+        self.setup_layout()
+        self.load_current_assets()
+        self.update_stats()
 
-root.mainloop()
+    def setup_layout(self):
+        """Creates the 3-part grid system defined in your UI specs."""
+        
+        # 1st Part: Main Game Display (Top Left)
+        self.display_canvas = tk.Canvas(self.root, width=900, height=600, bg="black", highlightthickness=0)
+        self.display_canvas.grid(row=0, column=0, sticky="nsew")
+
+        # 2nd Part: Action Frame (Bottom Left)
+        self.action_frame = tk.Frame(self.root, width=900, height=300, bg="#2c3e50")
+        self.action_frame.grid(row=1, column=0, sticky="nsew")
+        self.action_frame.grid_propagate(False)
+
+        # 3rd Part: Sidebar/Minigame (Right Side)
+        self.side_frame = tk.Frame(self.root, width=300, height=900, bg="#34495e")
+        self.side_frame.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        self.side_frame.grid_propagate(False)
+
+        # Adding basic Action Buttons
+        tk.Label(self.action_frame, text="CHOOSE YOUR ACTION", fg="white", bg="#2c3e50", font=("Arial", 14, "bold")).pack(pady=10)
+        btn_style = {"width": 15, "height": 2, "font": ("Arial", 12)}
+        
+        tk.Button(self.action_frame, text="ATTACK", **btn_style, command=lambda: self.play_turn("attack")).pack(side="left", padx=50)
+        tk.Button(self.action_frame, text="PARRY", **btn_style, command=lambda: self.play_turn("parry")).pack(side="left", padx=50)
+        tk.Button(self.action_frame, text="HEAL", **btn_style, command=lambda: self.play_turn("heal")).pack(side="left", padx=50)
+
+        # Sidebar Labels for Stats
+        self.stats_label = tk.Label(self.side_frame, text="", fg="white", bg="#34495e", font=("Consolas", 12), justify="left")
+        self.stats_label.pack(pady=20, padx=10)
+
+    def load_current_assets(self):
+        """Loads the background and enemy sprite from your Canva exports."""
+        try:
+            # 1. Background
+            bg_path = Background[self.game_system.current_area]
+            bg_img = Image.open(bg_path).resize((900, 600))
+            self.images['bg'] = ImageTk.PhotoImage(bg_img)
+            
+            # 2. Enemy Sprite
+            en_path = EnemySprites[self.game_system.current_area]
+            en_img = Image.open(en_path).convert("RGBA")
+            # Resize enemy to fit comfortably (e.g., 300x300)
+            en_img = en_img.resize((300, 300))
+            self.images['enemy'] = ImageTk.PhotoImage(en_img)
+
+            # Draw on Canvas
+            self.display_canvas.delete("all") # Clear previous
+            self.display_canvas.create_image(0, 0, anchor="nw", image=self.images['bg'])
+            # Place enemy in the center-right
+            self.display_canvas.create_image(600, 300, anchor="center", image=self.images['enemy'])
+            
+        except Exception as e:
+            print(f"Error loading images: {e}. Ensure filenames match.")
+
+    def update_stats(self):
+        """Updates the text in the sidebar."""
+        p = self.game_system.player
+        e = self.game_system.enemy
+        area_name = area[self.game_system.current_area]
+        
+        stat_text = (
+            f"AREA: {area_name.upper()}\n"
+            f"{'-'*20}\n"
+            f"PLAYER: {p.name}\n"
+            f"HP: {p.health}/100\n"
+            f"Score: {p.score}\n"
+            f"{'-'*20}\n"
+            f"ENEMY: {e.name}\n"
+            f"HP: {e.health}\n"
+        )
+        self.stats_label.config(text=stat_text)
+
+    def play_turn(self, action):
+        """The bridge between UI buttons and your logic."""
+        self.game_system.player.action = action
+        
+        # Trigger the minigame logic based on area
+        curr = self.game_system.current_area
+        if curr == 0: # Coin Flip
+            self.game_system.coin_flip(random.choice(['heads', 'tails'])) # Simplify for now
+        elif curr == 1: # RPS
+            self.game_system.rock_paper_scissors(random.choice(['rock', 'paper', 'scissors']))
+        else: # Dice
+            self.game_system.dice_roll()
+
+        # Finalize turn
+        self.game_system.CalculateOutcome()
+        self.update_stats()
+        
+        # If enemy died, reload assets for new area
+        self.load_current_assets()
+
+def main():
+    root = tk.Tk()
+    game_logic = GameSystem("Hero") # Initialize your existing logic
+    ui = GameUI(root, game_logic)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
