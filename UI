@@ -1,0 +1,19 @@
+import tkinter as tk
+from PIL import Image, ImageTk
+
+# 1. Setup the window
+root = tk.Tk()
+root.title("My Python Game")
+
+# 2. Create a Canvas (this is where your Canva assets live)
+canvas = tk.Canvas(root, width=800, height=600)
+canvas.pack()
+
+# 3. Load your Canva asset
+img = Image.open("your_asset.png")
+photo = ImageTk.PhotoImage(img)
+
+# 4. Place it on the screen
+canvas.create_image(400, 300, image=photo)
+
+root.mainloop()
