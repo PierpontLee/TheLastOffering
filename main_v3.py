@@ -78,7 +78,7 @@ class Character:
         self.health = health
         self.damage = damage
         self.type = type
-        self.action = None
+        self.action: str | None = None
         self.multiplier = 1.0
 
 # --- Integrated Game System ---
