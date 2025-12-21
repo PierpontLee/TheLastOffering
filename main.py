@@ -227,7 +227,7 @@ class GameUI:
         self.buttonFrame = tk.Frame(root, height=300, bg="#1a1a1a")
         self.buttonFrame.grid(row=1, column=0, sticky="nsew")
 
-        self.ids = {k: self.canvas.create_image(x, y) for k, x, y in [("bg", 0, 0), ("player", 200, 400), ("enemy", 650, 350)]}
+        self.ids = {k: self.canvas.create_image(x, y) for k, x, y in [("bg", 0, 0), ("player", 240, 430),("enemy", 450, 300)]}
         self.canvas.itemconfig(self.ids["bg"], anchor="nw")
         
         #Health bar
@@ -287,7 +287,7 @@ class GameUI:
                      ("playerHeal","MC/MCHeal"), 
                      ("playerDamaged","MC/MCDamaged"), 
                      ("playerIdle","MC/MCIdle")]:
-            self.assets[k] = self.loadImage(f, (300, 400))
+            self.assets[k] = self.loadImage(f, (150, 200))
         
         #Set action img
         for action in ["Attack", "Parry", "Heal"]: 
@@ -337,7 +337,11 @@ class GameUI:
         elif area["minigame"] == "RPS":
             self.playSound("rps")
             result = random.choice(["Rock", "Paper", "Scissor"])
-            multiplier = 0.5 if choice == result else (1.0 if {"Rock":"Scissor","Paper":"Rock","Scissor":"Paper"}[choice] == result else 0.0)
+            multiplier = (
+                1.5 if {"Rock": "Scissor", "Paper": "Rock", "Scissor": "Paper"}[choice] == result
+                else 1.0 if choice == result
+                else 0.0
+            )
             resultImageKey = f"enemyMinigame{result}"
             pool = [self.assets[f"enemyMinigame{r}"] for r in ["Rock", "Paper", "Scissor"]]
         else: #Dice
@@ -501,9 +505,9 @@ class GameUI:
         areas = self.game.areas[self.game.currentArea]
         self.assets["cb"] = self.loadImage(areas["bg"], (900, 600))
         # load enemy state image, fallback to idle if missing
-        self.assets["ce"] = self.loadImage(areas["states"].get(enemyState, areas["states"].get("idle")), (400, 500))
+        self.assets["ce"] = self.loadImage(areas["states"].get(enemyState, areas["states"].get("idle")), (240, 300))
         if self.assets["ce"] is None:
-            self.assets["ce"] = self.loadImage(areas["states"].get("idle"), (400, 500))
+            self.assets["ce"] = self.loadImage(areas["states"].get("idle"), (320, 400))
 
         self.canvas.itemconfig(self.ids["bg"], image=self.assets["cb"])
         self.canvas.itemconfig(self.ids["enemy"], image=self.assets["ce"])
@@ -513,8 +517,22 @@ class GameUI:
         self.canvas.itemconfig(self.ids["player"], image=player_img)
         
         # Update HP Bars
-        self.canvas.coords(self.playerHpBar, 50, 50, 50 + (2 * max(0, self.game.player["hp"])), 70)
-        self.canvas.coords(self.enemyHpBar, 650, 50, 650 + (200 * max(0, self.game.enemy["hp"]/self.game.enemy["max"])), 70)
+        player_x, player_y = 240, 430   # SAME as player image position
+        self.canvas.coords(
+            self.playerHpBar,
+            player_x - 100,
+            player_y - 180,
+            player_x - 100 + (2 * max(0, self.game.player["hp"])),
+            player_y - 160
+        )
+        enemy_x, enemy_y = 450, 300   # SAME as enemy image position
+        self.canvas.coords(
+            self.enemyHpBar,
+            enemy_x - 100,
+            enemy_y - 200,
+            enemy_x - 100 + (200 * max(0, self.game.enemy["hp"] / self.game.enemy["max"])),
+            enemy_y - 180
+        )
     
     #
     def loadSounds(self):
