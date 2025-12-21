@@ -5,7 +5,6 @@ Player Has 3 actions:
 1 - Parry = Fully block next Enemy attack and counter with 1.5x damage
 2 - Heal = Restore health based on stat
 Enemy Uses AI to predict Player'states next move based on the previous actions
-
 There are 3 areas:
 
 index - Area name - Minigame - Enemy
@@ -40,6 +39,7 @@ import random
 from pathlib import Path
 import numpy as np
 import tensorflow as tf
+import pygame
 
 # --- CONFIG ---
 ASSET_PATH = Path(__file__).parent.absolute() / "Assets"
@@ -143,6 +143,20 @@ class GameSystem:
             areas = self.areas[self.currentArea]
             self.enemy = {"hp": areas["enemyHP"], "max": areas["enemyHP"], "damage": areas["enemyDamage"]}
         else: self.victory = True
+        
+    def resetGame(self):
+        self.currentArea = 0
+        self.victory = False
+        self.dead = False
+
+        # Reset player
+        self.player = {"hp": 100, "damage": 15}
+
+        # Reset AI (VERY IMPORTANT)
+        self.ai = EnemyAI()
+
+        # Load first enemy again
+        self.nextStage()
 
 #Start Screen
 class StartScreen:
@@ -193,6 +207,13 @@ class StartScreen:
 class GameUI:
     def __init__(self, root, game):
         self.root, self.game, self.assets = root, game, {}
+        #sound loading
+        try:
+            pygame.mixer.init()
+            self.sounds = {}
+            self.loadSounds() # Load all audio files
+        except Exception as e:
+            print(f"Audio init failed: {e}")
         
         # Battle Layout
         self.canvas = tk.Canvas(root, width=900, height=600, bg="black", highlightthickness=0)
@@ -258,6 +279,7 @@ class GameUI:
         except Exception:
             return None
 
+    #Load Animation
     def loadStatic(self):
         #Asset setter
         for k, f in [("playerAttack","MC/MCAttack"), 
@@ -307,16 +329,19 @@ class GameUI:
 
         #Check area
         if area["minigame"] == "Coin":
+            self.playSound("coin")
             result = random.choice(["Head", "Tail"])
             multiplier = 1.0 if choice == result else 0.0
             resultImageKey = f"minigame{result}"
             pool = [self.assets["minigameHead"], self.assets["minigameTail"]]
         elif area["minigame"] == "RPS":
+            self.playSound("rps")
             result = random.choice(["Rock", "Paper", "Scissor"])
             multiplier = 0.5 if choice == result else (1.0 if {"Rock":"Scissor","Paper":"Rock","Scissor":"Paper"}[choice] == result else 0.0)
             resultImageKey = f"enemyMinigame{result}"
             pool = [self.assets[f"enemyMinigame{r}"] for r in ["Rock", "Paper", "Scissor"]]
         else: #Dice
+            self.playSound("dice")
             roll = random.randint(1, 6)
             multiplier = {1:0.2, 2:0.5, 3:0.8, 4:1.2, 5:1.5, 6:2.0}[roll]
             resultImageKey = f"dice{roll}"
@@ -332,9 +357,10 @@ class GameUI:
         if not pool and finalImage is not None:
             pool = [finalImage]
 
+        #Final Image
         if finalImage is None and pool:
             finalImage = pool[-1]
-
+        
         if count > 0:
             img = random.choice(pool) if pool else None
             self.resultLabel.config(image=img) # type: ignore
@@ -344,54 +370,115 @@ class GameUI:
             self.resultLabel.config(image=finalImage)
             self.applyTurnResults(playerMove, enemyMove, multiplier)
 
-
+    #Applying result from action button and minigame mult
     def applyTurnResults(self, playerMove, enemyMove, multiplier):
         damageToEnemy = 0
         damageToPlayer = 0
-        
+        message = ""
+
+        #Player successful attack
         if playerMove == "attack" and enemyMove != "parry":
             damageToEnemy = int(self.game.player["damage"] * multiplier)
+            self.playSound("slash")
+            message = f"DIRECT HIT!\nYou dealt {damageToEnemy} damage."
 
-        if playerMove == "parry" and enemyMove == "attack":
+        #Player sucessfull parry
+        elif playerMove == "parry" and enemyMove == "attack":
             damageToEnemy = int(self.game.player["damage"] * 1.5 * multiplier)
             damageToPlayer = 0
-            
-        if playerMove == "heal":
-            if multiplier > 0:
-                healed = int(15 * multiplier)
-                self.game.player["hp"] = min(100, self.game.player["hp"] + healed)
-            
-        if enemyMove == "heal":
-            self.game.enemy["hp"] = min(
+            self.playSound("parry")
+            message = f"PERFECT PARRY!\nYou deflected the strike."
+        
+        #Heal
+        elif playerMove or enemyMove == "heal":
+            #Player heal
+            if playerMove == "heal":
+                if multiplier > 0:
+                    healed = int(15 * multiplier)
+                    self.game.player["hp"] = min(100, self.game.player["hp"] + healed)
+                    self.playSound("heal")
+                    message = f"You healed {healed} health."
+            #Enemy heal
+            elif enemyMove == "heal":
+                self.game.enemy["hp"] = min(
                 self.game.enemy["max"],
                 self.game.enemy["hp"] + int(self.game.enemy["max"] * 0.1)
-            )
+                )
+                self.playSound("heal")
+            elif playerMove and enemyMove == "heal": #both heal
+                if multiplier > 0:
+                    healed = int(15 * multiplier)
+                    self.game.player["hp"] = min(100, self.game.player["hp"] + healed)
+                self.game.enemy["hp"] = min(
+                self.game.enemy["max"],
+                self.game.enemy["hp"] + int(self.game.enemy["max"] * 0.1))
+                self.playSound("heal")
+                message = "You both healed."
 
-        if enemyMove == "attack" and playerMove != "parry":
+        #Enemy Sucessful Attack
+        elif enemyMove == "attack" and playerMove != "parry":
             damageToPlayer = int(self.game.enemy["damage"])
-        
-        # Detailed Combat Log
-        if playerMove == "parry" and enemyMove == "attack":
-            message = f"PERFECT PARRY!\nYou deflected the strike."
+            self.playSound("slash")
+            message = f"YOU WERE HIT!\nReceived {damageToPlayer} damage."
+            
+        #Enemy Sucessful Parry
         elif enemyMove == "parry" and playerMove == "attack":
-            message = "CLANG!\nThe enemy parried your blade."
-        elif damageToEnemy > 0:
-            message = f"DIRECT HIT!\nYou dealt {damageToEnemy} damage."
-        elif damageToPlayer > 0:
-            message = f"YOU WERE STRUCK!\nReceived {damageToPlayer} damage."
+            damageToPlayer = int(self.game.player["damage"] * 1.5 * multiplier)
+            damageToEnemy = 0
+            self.playSound("parry")
+            message = "CLANG!\nYou've got parried by the enemy."
+        
         else:
-            message = "areas tense standoff...\nNo damage was dealt."
+            message = "A tense standoff...\nNo damage was dealt."
+        
+        #Impact sound
+        def playImpactSound():
+            if damageToEnemy > 0:
+                self.playSound("enemy_hurt")
+            elif damageToPlayer > 0:
+                self.playSound("mc_hurt")
+            elif enemyMove == "parry" and playerMove == "attack":
+                self.playSound("parry")
 
+        self.root.after(500, playImpactSound)
         self.log.config(text=message)
         self.game.enemy["hp"] -= damageToEnemy
         self.game.player["hp"] -= damageToPlayer
         
-        if self.game.player["hp"] <= 0: self.game.dead = True
-        self.game.ai.train(self.pending)
+        if self.game.player["hp"] <= 0:
+            self.game.dead = True
+            self.log.config(text="YOU DIED...\nReturning to the Catacomb")
+
+            # Disable buttons immediately
+            for button in self.actionButtons:
+                button.config(state="disabled")
+
+            # Restart after 3 seconds
+            self.root.after(3000, self.restartGame)
+            return
+
         
         player_state_key = "playerDamaged" if damageToPlayer > 0 else f"player{playerMove.capitalize()}"
         self.refresh(player_state_key, "damage" if damageToEnemy > 0 else enemyMove)
         self.root.after(2000, self.cleanUp)
+
+    #Restart game (lose)
+    def restartGame(self):
+        # Reset logic
+        self.game.resetGame()
+
+        # Clear UI
+        self.resultLabel.config(image="")
+        self.log.config(text="A new offering begins...")
+        for w in self.minigameFrame.winfo_children():
+            w.destroy()
+
+        # Re-enable buttons
+        for button in self.actionButtons:
+            button.config(state="normal")
+
+        # Refresh visuals to Area 0
+        self.refresh()
 
     #cleaning up
     def cleanUp(self):
@@ -428,6 +515,41 @@ class GameUI:
         # Update HP Bars
         self.canvas.coords(self.playerHpBar, 50, 50, 50 + (2 * max(0, self.game.player["hp"])), 70)
         self.canvas.coords(self.enemyHpBar, 650, 50, 650 + (200 * max(0, self.game.enemy["hp"]/self.game.enemy["max"])), 70)
+    
+    #
+    def loadSounds(self):
+        sound_map = {
+            "slash": "Slash.mp3",      
+            "parry": "Parry.mp3",     
+            "heal": "Heal.mp3",        
+            "coin": "Coin.mp3",          # Minigame: Coin Flip
+            "dice": "Dice.mp3",          # Minigame: Dice Roll
+            "rps": "RPS.mp3",            # Minigame: Rock Paper Scissors
+            "mc_hurt": "MCHurt.mp3", # Enemy takes damage
+            "enemy_hurt": "EnemyHurt.mp3"# Player takes damage
+        }
+
+        audio_folder = ASSET_PATH / "Audio"
+        
+        for key, filename in sound_map.items():
+            path = audio_folder / filename
+            if path.exists():
+                try:
+                    # Load sound and set default volume
+                    self.sounds[key] = pygame.mixer.Sound(str(path))
+                    self.sounds[key].set_volume(0.4) 
+                except Exception as e:
+                    print(f"Error loading sound {filename}: {e}")
+            else:
+                print(f"Sound file missing: {path}")
+    
+    #Play sound
+    def playSound(self, key):
+        if key in self.sounds:
+            try:
+                self.sounds[key].play()
+            except:
+                pass
 
 if __name__ == "__main__":
     root = tk.Tk()
