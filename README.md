@@ -35,7 +35,7 @@ python main.py
 ## Author
 Built by:
 - Leeman Pierpont Lawrence
-- Joey Jeffrey
+- Joey Jeffrey (DSC2409076)
 - Shaikamal Bekbolat
 - Gunadi Gideon
 - Zhang Yi Jun
